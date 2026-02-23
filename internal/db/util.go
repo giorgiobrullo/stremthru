@@ -38,11 +38,13 @@ func (uri ConnectionURI) DSN(mods ...DSNModifier) string {
 	switch u.Scheme {
 	case "sqlite":
 		q := u.Query()
-		q.Add("mode", "rwc")
-		q.Add("_busy_timeout", "5000")
-		q.Add("_journal_mode", "WAL")
-		q.Add("_txlock", "immediate")
-		q.Add("_loc", "UTC")
+		q.Set("mode", "rwc")
+		q.Set("_busy_timeout", "5000")
+		q.Set("_cache_size", "-64000")
+		q.Set("_journal_mode", "WAL")
+		q.Set("_loc", "UTC")
+		q.Set("_synchronous", "NORMAL")
+		q.Set("_txlock", "immediate")
 		for _, mod := range mods {
 			mod(u, &q)
 		}
