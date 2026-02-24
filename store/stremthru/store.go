@@ -172,7 +172,7 @@ func flattenContentFiles(files []usenet_pool.NZBContentFile, parentPath string) 
 		}
 		if len(f.Files) > 0 {
 			for _, f := range f.Parts {
-				if f.Size == 0 {
+				if f.Size == 0 || !f.Streamable {
 					continue
 				}
 				partPath := "/" + f.Name
@@ -188,7 +188,7 @@ func flattenContentFiles(files []usenet_pool.NZBContentFile, parentPath string) 
 			}
 			result = append(result, flattenContentFiles(f.Files, filePath)...)
 		} else {
-			if f.Size == 0 {
+			if f.Size == 0 || !f.Streamable {
 				continue
 			}
 			result = append(result, store.NewzFile{
@@ -202,19 +202,31 @@ func flattenContentFiles(files []usenet_pool.NZBContentFile, parentPath string) 
 	return result
 }
 
-func mapJobStatusToNewzStatus(status string) store.NewzStatus {
-	switch job_queue.EntryStatus(status) {
+func calculateNewzStatus(job_status string, info *nzb_info.NZBInfo) store.NewzStatus {
+	switch job_queue.EntryStatus(job_status) {
 	case job_queue.EntryStatusQueued:
 		return store.NewzStatusQueued
 	case job_queue.EntryStatusProcessing:
-		return store.NewzStatusProcessing
+		return store.NewzStatusDownloading
 	case job_queue.EntryStatusFailed:
 		return store.NewzStatusQueued
 	case job_queue.EntryStatusDead:
 		return store.NewzStatusFailed
 	case job_queue.EntryStatusDone:
-		return store.NewzStatusDownloaded
+		if info == nil {
+			return store.NewzStatusInvalid
+		}
+		if info.Streamable {
+			return store.NewzStatusDownloaded
+		}
+		return store.NewzStatusFailed
 	default:
+		if info != nil {
+			if info.Streamable {
+				return store.NewzStatusDownloaded
+			}
+			return store.NewzStatusFailed
+		}
 		return store.NewzStatusUnknown
 	}
 }
@@ -253,51 +265,55 @@ func (c *StoreClient) GetNewz(params *store.GetNewzParams) (*store.GetNewzData, 
 	if err != nil {
 		return nil, err
 	}
+
 	info, err := nzb_info.GetByHash(params.Id)
 	if err != nil {
 		return nil, err
 	}
+	job, err := nzb_info.GetJobById(params.Id)
+	if err != nil {
+		return nil, err
+	}
 
+	if info == nil && job == nil {
+		return nil, notFoundError()
+	}
+
+	data := &store.GetNewzData{
+		Status: store.NewzStatusUnknown,
+		Files:  []store.NewzFile{},
+	}
 	if info != nil {
-		data := &store.GetNewzData{
-			Id:      info.Hash,
-			Hash:    info.Hash,
-			Name:    info.Name,
-			Size:    info.Size,
-			Status:  store.NewzStatusUnknown,
-			Files:   []store.NewzFile{},
-			AddedAt: info.UAt.Time,
-		}
+		data.Id = info.Hash
+		data.Hash = info.Hash
+		data.Name = info.Name
+		data.Size = info.Size
+		data.AddedAt = info.CAt.Time
+
 		if info.Streamable {
-			data.Status = store.NewzStatusDownloaded
 			files := flattenContentFiles(info.ContentFiles.Data, "")
 			for i := range files {
 				file := &files[i]
 				file.Link = LockedFileLink("").Create(info.Hash, file.Path)
 			}
 			data.Files = files
-		} else {
-			data.Status = store.NewzStatusFailed
 		}
-		return data, nil
+		jobStatus := ""
+		if job != nil {
+			jobStatus = job.Status
+		}
+		data.Status = calculateNewzStatus(jobStatus, info)
 	}
 
-	job, err := nzb_info.GetJobById(params.Id)
-	if err != nil {
-		return nil, err
-	}
-	if job != nil {
-		data := &store.GetNewzData{
-			Id:     job.Key,
-			Hash:   job.Key,
-			Name:   job.Payload.Data.Name,
-			Status: mapJobStatusToNewzStatus(job.Status),
-			Files:  []store.NewzFile{},
-		}
-		return data, nil
+	if job != nil && info == nil {
+		data.Id = job.Key
+		data.Hash = job.Key
+		data.Name = job.Payload.Data.Name
+		data.Status = calculateNewzStatus(job.Status, nil)
+		data.AddedAt = job.CreatedAt.Time
 	}
 
-	return nil, notFoundError()
+	return data, nil
 }
 
 func (c *StoreClient) ListNewz(params *store.ListNewzParams) (*store.ListNewzData, error) {
@@ -316,6 +332,15 @@ func (c *StoreClient) ListNewz(params *store.ListNewzParams) (*store.ListNewzDat
 		return nil, err
 	}
 
+	jobs, err := nzb_info.GetAllJob()
+	if err != nil {
+		return nil, err
+	}
+	jobByKey := make(map[string]nzb_info.JobEntry, len(jobs))
+	for _, job := range jobs {
+		jobByKey[job.Key] = job
+	}
+
 	seen := make(map[string]struct{}, len(allInfos))
 	items := []store.ListNewzDataItem{}
 	for _, info := range allInfos {
@@ -328,16 +353,14 @@ func (c *StoreClient) ListNewz(params *store.ListNewzParams) (*store.ListNewzDat
 			Status:  store.NewzStatusDownloaded,
 			AddedAt: info.CAt.Time,
 		}
-		if !info.Streamable {
-			item.Status = store.NewzStatusFailed
+		jobStatus := ""
+		if job, exists := jobByKey[info.Hash]; exists {
+			jobStatus = job.Status
 		}
+		item.Status = calculateNewzStatus(jobStatus, &info)
 		items = append(items, item)
 	}
 
-	jobs, err := nzb_info.GetAllJob()
-	if err != nil {
-		return nil, err
-	}
 	for _, job := range jobs {
 		if _, exists := seen[job.Key]; exists {
 			continue
@@ -346,7 +369,7 @@ func (c *StoreClient) ListNewz(params *store.ListNewzParams) (*store.ListNewzDat
 			Id:      job.Key,
 			Hash:    job.Key,
 			Name:    job.Payload.Data.Name,
-			Status:  mapJobStatusToNewzStatus(job.Status),
+			Status:  calculateNewzStatus(job.Status, nil),
 			AddedAt: job.CreatedAt.Time,
 		})
 	}
