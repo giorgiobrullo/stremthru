@@ -329,7 +329,7 @@ function ContentFileNode({
               </TooltipContent>
             </Tooltip>
             <Badge className="text-xs" variant="outline">
-              {file.type}
+              {file.type || "unknown"}
             </Badge>
           </ItemTitle>
           <ItemDescription asChild>

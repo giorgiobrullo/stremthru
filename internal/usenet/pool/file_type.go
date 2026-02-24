@@ -15,7 +15,7 @@ var ftLog = logger.Scoped("usenet/pool/file_type")
 type FileType int
 
 const (
-	FileTypePlain FileType = iota
+	FileTypePlain FileType = iota + 1
 	FileTypeRAR
 	FileType7z
 )

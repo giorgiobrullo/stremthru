@@ -6,8 +6,11 @@ import (
 	"errors"
 	"path/filepath"
 
+	"github.com/MunifTanjim/stremthru/internal/config"
 	"github.com/MunifTanjim/stremthru/internal/logger"
 	"github.com/MunifTanjim/stremthru/internal/usenet/nzb"
+	"github.com/MunifTanjim/stremthru/internal/util"
+	"github.com/alitto/pond/v2"
 	"github.com/nwaples/rardecode/v2"
 )
 
@@ -19,6 +22,7 @@ const (
 	NZBContentFileTypeVideo   NZBContentFileType = "video"
 	NZBContentFileTypeArchive NZBContentFileType = "archive"
 	NZBContentFileTypeOther   NZBContentFileType = "other"
+	NZBContentFileTypeUnknown NZBContentFileType = ""
 )
 
 const (
@@ -53,21 +57,26 @@ func classifyNZBContentFileType(filename string) NZBContentFileType {
 	return NZBContentFileTypeOther
 }
 
-func areNZBContentFilesStreamable(files []NZBContentFile) bool {
+func hasStreamableVideoInNZBContentFiles(files []NZBContentFile) bool {
 	for i := range files {
 		f := &files[i]
-		if !f.Streamable {
-			return false
+		name := f.Name
+		if f.Alias != "" {
+			name = f.Alias
 		}
-		if len(f.Files) > 0 && !areNZBContentFilesStreamable(f.Files) {
-			return false
+		isVideo := isVideoFile(name)
+		if f.Streamable && isVideo {
+			return true
+		}
+		if len(f.Files) > 0 && hasStreamableVideoInNZBContentFiles(f.Files) {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func isNZBStremable(c *NZBContent) bool {
-	return areNZBContentFilesStreamable(c.Files)
+	return hasStreamableVideoInNZBContentFiles(c.Files)
 }
 
 type nzbArchiveFile struct {
@@ -115,6 +124,14 @@ func (p *Pool) InspectNZBContent(ctx context.Context, nzbDoc *nzb.NZB, password 
 
 	var nzbArchiveFiles []*nzbArchiveFile
 
+	type segmentFetchResult struct {
+		nzbFile *nzb.File
+		segment *SegmentData
+		err     error
+	}
+
+	var needsFetch []*nzb.File
+
 	for i := range nzbDoc.Files {
 		f := &nzbDoc.Files[i]
 		filename := f.Name()
@@ -139,18 +156,43 @@ func (p *Pool) InspectNZBContent(ctx context.Context, nzbDoc *nzb.NZB, password 
 			continue
 		}
 
+		if f.SegmentCount() == 0 {
+			content.Files = append(content.Files, NZBContentFile{
+				Type:       NZBContentFileTypeOther,
+				Name:       filename,
+				Size:       f.Size(),
+				Streamable: false,
+			})
+			continue
+		}
+
+		needsFetch = append(needsFetch, f)
+	}
+
+	fetchResults := make([]segmentFetchResult, len(needsFetch))
+	fetchPool := pond.NewPool(config.Newz.MaxConnectionPerStream)
+	for i, f := range needsFetch {
+		fetchPool.Submit(func() {
+			segment, err := p.fetchFirstSegment(ctx, f)
+			fetchResults[i] = segmentFetchResult{nzbFile: f, segment: segment, err: err}
+		})
+	}
+	fetchPool.StopAndWait()
+
+	for _, fr := range fetchResults {
+		filename := fr.nzbFile.Name()
 		streamable := true
-		fileType := FileTypePlain
-		var firstSegment *SegmentData
-		if f.SegmentCount() > 0 {
-			var err error
-			firstSegment, err = p.fetchFirstSegment(ctx, f)
-			if err != nil {
-				inspectLog.Warn("failed to fetch first segment for type detection", "error", err, "name", filename)
-				streamable = false
-			} else {
-				fileType = DetectFileType(firstSegment.Body, filename)
+		var fileType FileType
+		var errs []string
+
+		if fr.err != nil {
+			inspectLog.Warn("failed to fetch first segment for type detection", "error", fr.err, "name", filename)
+			streamable = false
+			if errors.Is(fr.err, ErrArticleNotFound) {
+				errs = append(errs, NZBContentFileErrorArticleNotFound)
 			}
+		} else {
+			fileType = DetectFileType(fr.segment.Body, filename)
 		}
 
 		switch fileType {
@@ -158,22 +200,29 @@ func (p *Pool) InspectNZBContent(ctx context.Context, nzbDoc *nzb.NZB, password 
 			af := &nzbArchiveFile{
 				filetype: fileType,
 				name:     filename,
-				size:     f.Size(),
+				size:     fr.nzbFile.Size(),
 				volume:   -1,
 			}
-			if fileType == FileTypeRAR && firstSegment != nil {
-				if vi, err := rardecode.ReadVolumeInfo(bytes.NewReader(firstSegment.Body), rardecode.SkipCheck, rardecode.IterHeadersOnly); err == nil {
+			if fileType == FileTypeRAR && fr.segment != nil {
+				if vi, err := rardecode.ReadVolumeInfo(bytes.NewReader(fr.segment.Body), rardecode.SkipCheck, rardecode.IterHeadersOnly); err == nil {
 					af.volume = vi.Number
 				}
 			}
 			nzbArchiveFiles = append(nzbArchiveFiles, af)
-			continue
 		case FileTypePlain:
 			content.Files = append(content.Files, NZBContentFile{
 				Type:       NZBContentFileTypeOther,
 				Name:       filename,
-				Size:       f.Size(),
+				Size:       fr.nzbFile.Size(),
 				Streamable: streamable,
+			})
+		default:
+			content.Files = append(content.Files, NZBContentFile{
+				Type:       NZBContentFileTypeUnknown,
+				Name:       filename,
+				Size:       fr.nzbFile.Size(),
+				Streamable: streamable,
+				Errors:     errs,
 			})
 		}
 	}
@@ -191,10 +240,10 @@ func (p *Pool) InspectNZBContent(ctx context.Context, nzbDoc *nzb.NZB, password 
 		}
 
 		ufs := NewUsenetFS(ctx, &UsenetFSConfig{
-			NZB:  nzbDoc,
-			Pool: p,
+			NZB:               nzbDoc,
+			Pool:              p,
+			SegmentBufferSize: util.ToBytes("1MB"),
 		})
-		defer ufs.Close()
 
 		archiveName := name
 		if group.Aliased {
@@ -251,6 +300,7 @@ func (p *Pool) InspectNZBContent(ctx context.Context, nzbDoc *nzb.NZB, password 
 				entry.Errors = append(entry.Errors, NZBContentFileErrorOpenFailed)
 			}
 			content.Files = append(content.Files, entry)
+			ufs.Close()
 			continue
 		}
 
@@ -270,6 +320,7 @@ func (p *Pool) InspectNZBContent(ctx context.Context, nzbDoc *nzb.NZB, password 
 		}
 
 		archive.Close()
+		ufs.Close()
 		content.Files = append(content.Files, entry)
 	}
 

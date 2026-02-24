@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"sync"
 	"time"
 
@@ -350,7 +349,7 @@ func (p *Pool) fetchSegment(ctx context.Context, segment *nzb.Segment, groups []
 
 		allArticleNotFound := len(errs) > 0
 		for _, e := range errs {
-			if e != nil && !isArticleNotFoundError(e) {
+			if e != nil && !isArticleNotFoundError(e) && !errors.Is(e, ErrNoProvidersAvailable) {
 				allArticleNotFound = false
 				break
 			}
@@ -359,7 +358,7 @@ func (p *Pool) fetchSegment(ctx context.Context, segment *nzb.Segment, groups []
 		if allArticleNotFound {
 			return nil, fmt.Errorf("%w: failed to fetch segment %d <%s> after retries: %s", ErrArticleNotFound, segment.Number, messageId, retryErr.Error())
 		}
-		return nil, errors.New("failed to fetch segment " + strconv.Itoa(segment.Number) + " <" + messageId + "> after retries: " + retryErr.Error())
+		return nil, fmt.Errorf("failed to fetch segment %d <%s> after retries: %w", segment.Number, messageId, retryErr)
 	})
 
 	if err != nil {

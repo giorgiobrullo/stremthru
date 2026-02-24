@@ -43,6 +43,7 @@ type UsenetFS struct {
 	files             map[string]UsenetFileInfo
 	aliases           map[string]string // alias name → real filename
 	segmentBufferSize int64
+	openFiles         []*UsenetFile
 }
 
 func (ufs *UsenetFS) SetAliases(aliases map[string]string) {
@@ -102,10 +103,12 @@ func (ufs *UsenetFS) Open(name string) (fs.File, error) {
 
 	fi.size = stream.Size()
 
-	return &UsenetFile{
+	uf := &UsenetFile{
 		FileStream: stream,
 		fi:         &fi,
-	}, nil
+	}
+	ufs.openFiles = append(ufs.openFiles, uf)
+	return uf, nil
 }
 
 func (ufs *UsenetFS) Stat(name string) (os.FileInfo, error) {
@@ -130,6 +133,10 @@ func (ufs *UsenetFS) Stat(name string) (os.FileInfo, error) {
 }
 
 func (ufs *UsenetFS) Close() error {
+	for _, f := range ufs.openFiles {
+		f.FileStream.Close()
+	}
+	ufs.openFiles = nil
 	ufs.cancel()
 	return nil
 }
