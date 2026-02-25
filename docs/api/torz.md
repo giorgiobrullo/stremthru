@@ -227,6 +227,4 @@ The generated direct link should be valid for 12 hours.
 
 StremThru exposes a Torznab-compatible API endpoint that can be used with tools like Prowlarr, Radarr, Sonarr etc.
 
-**Authentication:** Uses the `STREMTHRU_AUTH` credentials, passed via the `apikey` query parameter.
-
 **Output format:** Controlled by the `o` query parameter (`xml` default, `json` supported).

@@ -335,7 +335,7 @@ function NewznabIndexerFormSheet({
             <SheetDescription>
               {editItem
                 ? "Update the API key for this Newznab indexer."
-                : "Add a Newznab indexer (e.g., NZBGeek, DrunkenSlug). The API key will be encrypted before storage."}
+                : "Add a Newznab indexer. The API key will be encrypted before storage."}
             </SheetDescription>
           </SheetHeader>
 

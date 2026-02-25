@@ -32,6 +32,12 @@ export default defineConfig({
         ],
       },
       {
+        text: "Guides",
+        items: [
+          { text: "Usenet Setup", link: "/guides/usenet-setup" },
+        ],
+      },
+      {
         text: "Configuration",
         items: [
           { text: "Overview", link: "/configuration/" },
