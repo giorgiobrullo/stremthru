@@ -69,7 +69,7 @@ type JobQueueEntry[T any] struct {
 }
 
 var query_queue_entry = fmt.Sprintf(
-	`INSERT INTO %s AS tq (%s, %s, %s, %s, %s) VALUES (?, ?, ?, ?, ?) ON CONFLICT (%s, %s) DO UPDATE SET %s = EXCLUDED.%s, %s = '%s', %s = '[]', %s = MAX(tq.%s, EXCLUDED.%s), %s = EXCLUDED.%s, %s = %s`,
+	`INSERT INTO %s AS tq (%s, %s, %s, %s, %s) VALUES (?, ?, ?, ?, ?) ON CONFLICT (%s, %s) DO UPDATE SET %s = EXCLUDED.%s, %s = '%s', %s = '[]', %s = %s(tq.%s, EXCLUDED.%s), %s = EXCLUDED.%s, %s = %s`,
 	TableName,
 	Column.Name,
 	Column.Key,
@@ -80,7 +80,7 @@ var query_queue_entry = fmt.Sprintf(
 	Column.Payload, Column.Payload,
 	Column.Status, EntryStatusQueued,
 	Column.Error,
-	Column.Priority, Column.Priority, Column.Priority,
+	Column.Priority, db.FnMax, Column.Priority, Column.Priority,
 	Column.ProcessAfter, Column.ProcessAfter,
 	Column.UpdatedAt, db.CurrentTimestamp,
 )

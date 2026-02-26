@@ -28,6 +28,7 @@ var BooleanTrue string
 var CurrentTimestamp string
 var FnJSONGroupArray string
 var FnJSONObject string
+var FnMax string
 var NewAdvisoryLock func(names ...string) AdvisoryLock
 
 var connUri, dsnModifiers = func() (ConnectionURI, []DSNModifier) {
@@ -46,6 +47,7 @@ var connUri, dsnModifiers = func() (ConnectionURI, []DSNModifier) {
 		CurrentTimestamp = "unixepoch()"
 		FnJSONGroupArray = "json_group_array"
 		FnJSONObject = "json_object"
+		FnMax = "max"
 		NewAdvisoryLock = sqliteNewAdvisoryLock
 
 		dsnModifiers = append(dsnModifiers, func(u *url.URL, q *url.Values) {
@@ -57,6 +59,7 @@ var connUri, dsnModifiers = func() (ConnectionURI, []DSNModifier) {
 		CurrentTimestamp = "current_timestamp"
 		FnJSONGroupArray = "json_agg"
 		FnJSONObject = "json_build_object"
+		FnMax = "greatest"
 		NewAdvisoryLock = postgresNewAdvisoryLock
 	default:
 		log.Fatalf("[db] unsupported dialect: %v\n", Dialect)

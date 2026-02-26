@@ -3,7 +3,6 @@ package nzb_info
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 
 	"github.com/MunifTanjim/stremthru/internal/db"
 	usenet_pool "github.com/MunifTanjim/stremthru/internal/usenet/pool"
@@ -81,7 +80,7 @@ type NZBInfo struct {
 var query_upsert = fmt.Sprintf(
 	`INSERT INTO %s (%s) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (%s) DO UPDATE SET %s = EXCLUDED.%s, %s = EXCLUDED.%s, %s = EXCLUDED.%s, %s = EXCLUDED.%s, %s = EXCLUDED.%s, %s = EXCLUDED.%s, %s = EXCLUDED.%s, %s = EXCLUDED.%s, %s = EXCLUDED.%s, %s = %s`,
 	TableName,
-	strings.Join([]string{Column.Id, Column.Hash, Column.Name, Column.Size, Column.FileCount, Column.Password, Column.URL, Column.Files, Column.Streamable, Column.User, Column.Date, Column.Status}, ", "),
+	db.JoinColumnNames(Column.Id, Column.Hash, Column.Name, Column.Size, Column.FileCount, Column.Password, Column.URL, Column.Files, Column.Streamable, Column.User, Column.Date, Column.Status),
 	Column.Hash,
 	Column.Name, Column.Name,
 	Column.Size, Column.Size,
@@ -131,7 +130,7 @@ func UpdateStatus(hash string, status string) error {
 
 var query_get_by_id = fmt.Sprintf(
 	`SELECT %s FROM %s WHERE %s = ?`,
-	strings.Join(columns, ", "),
+	db.JoinColumnNames(columns...),
 	TableName,
 	Column.Id,
 )
@@ -150,7 +149,7 @@ func GetById(id string) (*NZBInfo, error) {
 
 var query_get_by_hash = fmt.Sprintf(
 	`SELECT %s FROM %s WHERE %s = ?`,
-	strings.Join(columns, ", "),
+	db.JoinColumnNames(columns...),
 	TableName,
 	Column.Hash,
 )
@@ -169,7 +168,7 @@ func GetByHash(hash string) (*NZBInfo, error) {
 
 var query_get_all = fmt.Sprintf(
 	`SELECT %s FROM %s ORDER BY %s DESC`,
-	strings.Join(columns, ", "),
+	db.JoinColumnNames(columns...),
 	TableName,
 	Column.CAt,
 )
