@@ -384,6 +384,11 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 				stores := ud.GetStores()
 				for i := range stores {
 					s := &stores[i]
+
+					if _, ok := s.Store.(store.NewzStore); !ok {
+						continue
+					}
+
 					storeName := s.Store.GetName()
 
 					if lockedProvider != "" && lockedProvider != string(storeName) {
